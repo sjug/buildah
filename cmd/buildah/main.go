@@ -1,20 +1,26 @@
 package main
 
 import (
+	"context"
 	"fmt"
-	"github.com/containers/buildah"
+	"io"
 	"os"
+
+	"github.com/containers/buildah"
+	"github.com/containers/buildah/pkg/tracing"
 
 	"github.com/containers/libpod/pkg/util"
 	"github.com/containers/storage"
 	ispecs "github.com/opencontainers/image-spec/specs-go"
 	rspecs "github.com/opencontainers/runtime-spec/specs-go"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 type globalFlags struct {
 	Debug             bool
+	Trace             bool
 	Root              string
 	RunRoot           string
 	StorageDriver     string
@@ -44,6 +50,9 @@ var rootCmd = &cobra.Command{
 
 var (
 	globalFlagResults globalFlags
+	span              opentracing.Span
+	closer            io.Closer
+	Ctx               context.Context
 )
 
 func init() {
@@ -67,6 +76,7 @@ func init() {
 	//rootCmd.TraverseChildren = true
 	rootCmd.Version = fmt.Sprintf("%s (image-spec %s, runtime-spec %s)", buildah.Version, ispecs.Version, rspecs.Version)
 	rootCmd.PersistentFlags().BoolVar(&globalFlagResults.Debug, "debug", false, "print debugging information")
+	rootCmd.PersistentFlags().BoolVar(&globalFlagResults.Trace, "trace", false, "enable opentracing output")
 	// TODO Need to allow for environment variable
 	rootCmd.PersistentFlags().StringVar(&globalFlagResults.RegistriesConf, "registries-conf", "", "path to registries.conf file (not usually used)")
 	rootCmd.PersistentFlags().StringVar(&globalFlagResults.RegistriesConfDir, "registries-conf-dir", "", "path to registries.conf.d directory (not usually used)")
@@ -95,6 +105,16 @@ func before(cmd *cobra.Command, args []string) error {
 		llFlagNum, _ = cmd.Flags().GetInt("log-level")
 	}
 	logrus.SetLevel(logrus.ErrorLevel + logrus.Level(llFlagNum))
+	if globalFlagResults.Trace {
+		trace = true
+		var tracer opentracing.Tracer
+		tracer, closer = tracing.Init("buildah")
+		opentracing.SetGlobalTracer(tracer)
+
+		span = tracer.StartSpan("before-context")
+
+		Ctx = opentracing.ContextWithSpan(context.Background(), span)
+	}
 	if globalFlagResults.Debug {
 		logrus.SetLevel(logrus.DebugLevel)
 	}
@@ -103,6 +123,10 @@ func before(cmd *cobra.Command, args []string) error {
 }
 
 func after(cmd *cobra.Command, args []string) error {
+	if trace {
+		span.Finish()
+		closer.Close()
+	}
 	if needToShutdownStore {
 		store, err := getStore(cmd)
 		if err != nil {
