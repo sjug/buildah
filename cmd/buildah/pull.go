@@ -6,6 +6,7 @@ import (
 	"github.com/containers/buildah"
 	buildahcli "github.com/containers/buildah/pkg/cli"
 	"github.com/containers/buildah/pkg/parse"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
@@ -59,6 +60,11 @@ func init() {
 }
 
 func pullCmd(c *cobra.Command, args []string, iopts pullResults) error {
+	if c.GlobalBool("trace") {
+		span, _ := opentracing.StartSpanFromContext(Ctx, "pullCmd")
+		defer span.Finish()
+	}
+
 	if len(args) == 0 {
 		return errors.Errorf("an image name must be specified")
 	}

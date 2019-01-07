@@ -13,6 +13,7 @@ import (
 	lu "github.com/containers/libpod/pkg/util"
 	"github.com/containers/storage"
 	digest "github.com/opencontainers/go-digest"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -22,6 +23,12 @@ import (
 var needToShutdownStore = false
 
 func getStore(c *cobra.Command) (storage.Store, error) {
+	if Ctx != nil {
+		span, _ := opentracing.StartSpanFromContext(Ctx, "getStore")
+		span.SetTag("type", "store")
+		defer span.Finish()
+	}
+
 	options, _, err := lu.GetDefaultStoreOptions()
 	if err != nil {
 		return nil, err
@@ -178,6 +185,9 @@ func getDateAndDigestAndSize(ctx context.Context, image storage.Image, store sto
 
 // getContext returns a context.TODO
 func getContext() context.Context {
+	if Ctx != nil {
+		return Ctx
+	}
 	return context.TODO()
 }
 

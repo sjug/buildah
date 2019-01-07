@@ -13,6 +13,7 @@ import (
 	"github.com/containers/image/transports/alltransports"
 	"github.com/containers/image/types"
 	"github.com/containers/storage"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -53,6 +54,10 @@ func init() {
 }
 
 func rmiCmd(c *cobra.Command, args []string, iopts rmiResults) error {
+	if c.GlobalBool("trace") {
+		span, _ := opentracing.StartSpanFromContext(Ctx, "rmiCmd")
+		defer span.Finish()
+	}
 	if len(args) == 0 && !iopts.all && !iopts.prune {
 		return errors.Errorf("image name or ID must be specified")
 	}
