@@ -106,7 +106,6 @@ func before(cmd *cobra.Command, args []string) error {
 	}
 	logrus.SetLevel(logrus.ErrorLevel + logrus.Level(llFlagNum))
 	if globalFlagResults.Trace {
-		trace = true
 		var tracer opentracing.Tracer
 		tracer, closer = tracing.Init("buildah")
 		opentracing.SetGlobalTracer(tracer)
@@ -123,7 +122,7 @@ func before(cmd *cobra.Command, args []string) error {
 }
 
 func after(cmd *cobra.Command, args []string) error {
-	if trace {
+	if globalFlagResults.Trace {
 		span.Finish()
 		closer.Close()
 	}

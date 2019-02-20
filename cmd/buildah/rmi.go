@@ -54,7 +54,7 @@ func init() {
 }
 
 func rmiCmd(c *cobra.Command, args []string, iopts rmiResults) error {
-	if c.GlobalBool("trace") {
+	if globalFlagResults.Trace {
 		span, _ := opentracing.StartSpanFromContext(Ctx, "rmiCmd")
 		defer span.Finish()
 	}

@@ -60,7 +60,7 @@ func init() {
 }
 
 func pullCmd(c *cobra.Command, args []string, iopts pullResults) error {
-	if c.GlobalBool("trace") {
+	if globalFlagResults.Trace {
 		span, _ := opentracing.StartSpanFromContext(Ctx, "pullCmd")
 		defer span.Finish()
 	}
