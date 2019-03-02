@@ -23,7 +23,7 @@ import (
 var needToShutdownStore = false
 
 func getStore(c *cobra.Command) (storage.Store, error) {
-	if Ctx != nil {
+	if c.Flag("trace").Changed && Ctx != nil {
 		span, _ := opentracing.StartSpanFromContext(Ctx, "getStore")
 		span.SetTag("type", "store")
 		defer span.Finish()

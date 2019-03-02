@@ -9,6 +9,7 @@ import (
 	"github.com/containers/buildah/imagebuildah"
 	buildahcli "github.com/containers/buildah/pkg/cli"
 	"github.com/containers/buildah/pkg/parse"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -83,6 +84,11 @@ func getDockerfiles(files []string) []string {
 }
 
 func budCmd(c *cobra.Command, inputArgs []string, iopts budResults) error {
+	if globalFlagResults.Trace {
+		span, _ := opentracing.StartSpanFromContext(Ctx, "budCmd")
+		defer span.Finish()
+	}
+
 	output := ""
 	tags := []string{}
 	if c.Flag("tag").Changed {
