@@ -32,6 +32,7 @@ import (
 	"github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/runtime-spec/specs-go"
 	"github.com/openshift/imagebuilder"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -633,6 +634,10 @@ func NewExecutor(store storage.Store, options BuildOptions) (*Executor, error) {
 // Prepare creates a working container based on specified image, or if one
 // isn't specified, the first FROM instruction we can find in the parsed tree.
 func (b *Executor) Prepare(ctx context.Context, stage imagebuilder.Stage, from string) error {
+	span, _ := opentracing.StartSpanFromContext(ctx, "execPrepare")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	ib := stage.Builder
 	node := stage.Node
 
@@ -801,6 +806,10 @@ func (b *Executor) resolveNameToImageRef() (types.ImageReference, error) {
 
 // Execute runs each of the steps in the parsed tree, in turn.
 func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error {
+	span, _ := opentracing.StartSpanFromContext(ctx, "execExecute")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	ib := stage.Builder
 	node := stage.Node
 	checkForLayers := true
@@ -814,6 +823,8 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 			leftoverArgs = append(leftoverArgs, arg)
 		}
 	}
+
+	span.LogKV("event", "startLoop")
 	for i, node := range node.Children {
 		step := ib.Step()
 		if err := step.Resolve(node); err != nil {
@@ -869,6 +880,8 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 			}
 		}
 
+		span.LogKV("event", "PreworkComplete")
+
 		// checkForLayers will be true if b.layers is true and a cached intermediate image is found.
 		// checkForLayers is set to false when either there is no cached image or a break occurs where
 		// the instructions in the Dockerfile change from a previous build.
@@ -884,6 +897,8 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 			fmt.Fprintf(b.out, "--> Using cache %s\n", cacheID)
 		}
 
+		span.LogKV("event", "LayerCheckComplete")
+
 		// If a cache is found for the last step, that means nothing in the
 		// Dockerfile changed. Just create a copy of the existing image and
 		// save it with the new name passed in by the user.
@@ -894,6 +909,7 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 			b.containerIDs = append(b.containerIDs, b.builder.ContainerID)
 			break
 		}
+		span.LogKV("event", "CopyExistingImagesComplete")
 
 		if cacheID == "" || !checkForLayers {
 			checkForLayers = false
@@ -902,6 +918,8 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 				return errors.Wrapf(err, "error building at step %+v", *step)
 			}
 		}
+
+		span.LogKV("event", "ibRunComplete")
 
 		// Commit if no cache is found
 		if cacheID == "" {
@@ -917,6 +935,9 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 			// it is used to create the container for the next step.
 			imgID = cacheID
 		}
+
+		span.LogKV("event", "CommitComplete")
+
 		// Add container ID of successful intermediate container to b.containerIDs
 		b.containerIDs = append(b.containerIDs, b.builder.ContainerID)
 		// Prepare for the next step with imgID as the new base image.
@@ -925,15 +946,21 @@ func (b *Executor) Execute(ctx context.Context, stage imagebuilder.Stage) error 
 				return errors.Wrap(err, "error preparing container for next step")
 			}
 		}
+		span.LogKV("event", "PrepareComplete")
 	}
 	if len(leftoverArgs) > 0 {
 		fmt.Fprintf(b.out, "[Warning] One or more build-args %v were not consumed\n", leftoverArgs)
 	}
+	span.LogKV("event", "TheEnd")
 	return nil
 }
 
 // copyExistingImage creates a copy of an image already in store
 func (b *Executor) copyExistingImage(ctx context.Context, cacheID string) error {
+	span, _ := opentracing.StartSpanFromContext(ctx, "copyExistingImage")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	// Get the destination Image Reference
 	dest, err := b.resolveNameToImageRef()
 	if err != nil {
@@ -961,6 +988,10 @@ func (b *Executor) copyExistingImage(ctx context.Context, cacheID string) error 
 // layerExists returns true if an intermediate image of currNode exists in the image store from a previous build.
 // It verifies this by checking the parent of the top layer of the image and the history.
 func (b *Executor) layerExists(ctx context.Context, currNode *parser.Node, children []*parser.Node) (string, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "layerExists")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	// Get the list of images available in the image store
 	images, err := b.store.Images()
 	if err != nil {
@@ -999,6 +1030,10 @@ func (b *Executor) layerExists(ctx context.Context, currNode *parser.Node, child
 
 // getImageHistory returns the history of imageID.
 func (b *Executor) getImageHistory(ctx context.Context, imageID string) ([]v1.History, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "getImageHistory")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	imageRef, err := is.Transport.ParseStoreReference(b.store, "@"+imageID)
 	if err != nil {
 		return nil, errors.Wrapf(err, "error getting image reference %q", imageID)
@@ -1139,6 +1174,10 @@ func urlContentModified(url string, historyTime *time.Time) (bool, error) {
 // Commit writes the container's contents to an image, using a passed-in tag as
 // the name if there is one, generating a unique ID-based one otherwise.
 func (b *Executor) Commit(ctx context.Context, ib *imagebuilder.Builder, createdBy string) (string, reference.Canonical, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "execCommit")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	imageRef, err := b.resolveNameToImageRef()
 	if err != nil {
 		return "", nil, err
@@ -1245,6 +1284,10 @@ func (b *Executor) Commit(ctx context.Context, ib *imagebuilder.Builder, created
 // Build takes care of the details of running Prepare/Execute/Commit/Delete
 // over each of the one or more parsed Dockerfiles and stages.
 func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (string, reference.Canonical, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "execBuild")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	if len(stages) == 0 {
 		errors.New("error building: no stages to build")
 	}
@@ -1263,6 +1306,7 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 			return "", nil, err
 		}
 
+		logrus.Debugln("Starting Prepare fn")
 		stageExecutor = b.withName(stage.Name, stage.Position, base)
 		if err := stageExecutor.Prepare(ctx, stage, base); err != nil {
 			return "", nil, err
@@ -1273,6 +1317,7 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 		if b.forceRmIntermediateCtrs || (!b.layers && !b.noCache) {
 			defer stageExecutor.Delete()
 		}
+		logrus.Debugln("Starting Execute fn")
 		if err := stageExecutor.Execute(ctx, stage); err != nil {
 			lastErr = err
 		}
@@ -1299,6 +1344,7 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 		}
 		stageCount++
 	}
+	span.LogKV("event", "completeStageRange")
 
 	var imageRef reference.Canonical
 	imageID := ""
@@ -1319,6 +1365,7 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 		imageID = imgID
 		imageRef = ref
 	}
+	span.LogKV("event", "completeIgnoreLayers")
 	// If building with layers and b.removeIntermediateCtrs is true
 	// only remove intermediate container for each step if an error
 	// during the build process doesn't occur.
@@ -1332,12 +1379,14 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 			return "", nil, errors.Errorf("Failed to cleanup intermediate containers")
 		}
 	}
+	span.LogKV("event", "completeRemoveIntermediateCtrs")
 	// Remove intermediate images that we created for AS clause handling
 	for _, value := range b.imageMap {
 		if _, err := b.store.DeleteImage(value, true); err != nil {
 			logrus.Debugf("unable to remove intermediate image %q: %v", value, err)
 		}
 	}
+	span.LogKV("event", "completeBuildExec")
 	return imageID, imageRef, nil
 }
 
@@ -1345,6 +1394,10 @@ func (b *Executor) Build(ctx context.Context, stages imagebuilder.Stages) (strin
 // URLs), creates a new Executor, and then runs Prepare/Execute/Commit/Delete
 // over the entire set of instructions.
 func BuildDockerfiles(ctx context.Context, store storage.Store, options BuildOptions, paths ...string) (string, reference.Canonical, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "buildDockerFiles")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	if len(paths) == 0 {
 		return "", nil, errors.Errorf("error building: no dockerfiles specified")
 	}
@@ -1412,6 +1465,8 @@ func BuildDockerfiles(ctx context.Context, store storage.Store, options BuildOpt
 
 		dockerfiles = append(dockerfiles, data)
 	}
+
+	span.LogKV("event", "completeDirRange")
 
 	dockerfiles = processCopyFrom(dockerfiles)
 

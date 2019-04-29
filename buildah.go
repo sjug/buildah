@@ -16,6 +16,7 @@ import (
 	"github.com/containers/storage"
 	"github.com/containers/storage/pkg/ioutils"
 	"github.com/opencontainers/image-spec/specs-go/v1"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -422,6 +423,10 @@ type ImportFromImageOptions struct {
 
 // NewBuilder creates a new build container.
 func NewBuilder(ctx context.Context, store storage.Store, options BuilderOptions) (*Builder, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "newBuilder")
+	span.SetTag("ref", "imageBuildah")
+	defer span.Finish()
+
 	return newBuilder(ctx, store, options)
 }
 

@@ -19,6 +19,7 @@ import (
 	"github.com/containers/storage"
 	"github.com/containers/storage/pkg/archive"
 	digest "github.com/opencontainers/go-digest"
+	opentracing "github.com/opentracing/opentracing-go"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 )
@@ -112,6 +113,10 @@ type PushOptions struct {
 // add any additional tags that were specified. Returns the ID of the new image
 // if commit was successful and the image destination was local
 func (b *Builder) Commit(ctx context.Context, dest types.ImageReference, options CommitOptions) (string, reference.Canonical, digest.Digest, error) {
+	span, _ := opentracing.StartSpanFromContext(ctx, "builderCommit")
+	span.SetTag("ref", "builder")
+	defer span.Finish()
+
 	var imgID string
 
 	systemContext := getSystemContext(options.SystemContext, options.SignaturePolicyPath)
